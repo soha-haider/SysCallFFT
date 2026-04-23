@@ -1,5 +1,4 @@
 /*
- * CT-353 Operating Systems — Linux CCP
  * 15 System Calls + Parallel FFT (N=2048)
  * Compile: gcc linux_ccp.c -o ccp -lpthread -lm
  */
