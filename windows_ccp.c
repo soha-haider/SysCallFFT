@@ -1,5 +1,4 @@
 /*
- * CT-353 Operating Systems — Windows CCP
  * 15 System Calls + Parallel FFT (N=2048)
  * Compile (MinGW): gcc windows_ccp.c -o ccp.exe -ladvapi32 -lm
  * Compile (MSVC):  cl windows_ccp.c /Fe:ccp.exe /link advapi32.lib
