@@ -1,7 +1,23 @@
 /*
- * 15 System Calls + Parallel FFT (N=2048)
+ * CT-353 Operating Systems — Windows CCP
+ * 15 System Calls + Parallel FFT (N=1024)
  * Compile (MinGW): gcc windows_ccp.c -o ccp.exe -ladvapi32 -lm
  * Compile (MSVC):  cl windows_ccp.c /Fe:ccp.exe /link advapi32.lib
+ *
+ * ┌─────────────┬──────────────────────────────────────────────┬─────────────────────────┐
+ * │  Category   │  Windows (this file)                         │  Linux equivalent       │
+ * ├─────────────┼──────────────────────────────────────────────┼─────────────────────────┤
+ * │  File I/O   │  CreateFile, ReadFile, WriteFile, CloseHandle│  open, read,            │
+ * │             │                                              │  write, close           │
+ * │  CRT I/O    │  _open, _write, _read, _close               │  open, write,           │
+ * │             │                                              │  read, close            │
+ * │  Process    │  CreateProcess, WaitForSingleObject          │  fork, execlp, waitpid  │
+ * │  Memory     │  VirtualAlloc, VirtualFree                   │  mmap, munmap           │
+ * │  IPC        │  CreatePipe, CreateFileMapping, MapViewOfFile│  pipe, shmget, shmat    │
+ * │  Permissions│  SetFileSecurity                             │  chmod, chown, umask    │
+ * │  Threading  │  CreateThread, WaitForMultipleObjects        │  pthread_create,        │
+ * │             │                                              │  pthread_join           │
+ * └─────────────┴──────────────────────────────────────────────┴─────────────────────────┘
  */
 
 #include <windows.h>
@@ -16,7 +32,7 @@
 #ifndef M_PI
 #define M_PI 3.14159265358979323846
 #endif
-#define N 2048
+#define N 1024
 
 typedef struct { double real, imag; } Complex;
 typedef struct { Complex *data; int len, start, end; } ThreadArg;
@@ -45,6 +61,7 @@ static void bit_reverse(Complex *x, int n) {
     }
 }
 
+/* Windows thread worker — mirrors static void *fft_worker() on Linux */
 DWORD WINAPI fft_worker(LPVOID arg) {
     ThreadArg *a = (ThreadArg *)arg;
     int half = a->len / 2;
@@ -70,11 +87,12 @@ int main(void) {
     LARGE_INTEGER freq, t0, t1;
     QueryPerformanceFrequency(&freq);
 
-    double time_crt=0, time_write=0, time_read=0, time_map=0;
-    double time_pipe=0, time_vm=0, time_perm=0, time_proc=0, time_fft=0;
-    SIZE_T vm_bytes = 0;
+    double time_crt   = 0, time_write = 0, time_read = 0, time_map  = 0;
+    double time_pipe  = 0, time_vm    = 0, time_perm = 0, time_proc = 0;
+    double time_fft   = 0;
+    SIZE_T vm_bytes   = 0;
     char   pipe_msg[64] = {0};
-    DWORD  written = 0;
+    DWORD  written      = 0;
 
     /* Log file */
     gLog = CreateFileA("ccp_log.txt", GENERIC_WRITE, 0, NULL,
@@ -83,6 +101,7 @@ int main(void) {
     log_msg("=== CCP LOG START ===");
 
     /* ══ 1. CRT I/O: _open / _write / _read / _close ════════
+          SC #1 _open  SC #2 _write  SC #3 _read  SC #4 _close
           Linux equivalent: open() / write() / read() / close() */
     printf("[1/9] CRT File I/O...\n");
     QueryPerformanceCounter(&t0);
@@ -113,7 +132,9 @@ int main(void) {
     QueryPerformanceCounter(&t1);
     time_crt = elapsed(t0, t1, freq);
 
-    /* ══ 2. CreateFile / WriteFile / CloseHandle ═════════════ */
+    /* ══ 2. CreateFile / WriteFile / CloseHandle ═════════════
+          SC #5 CreateFile  SC #6 WriteFile  SC #7 CloseHandle
+          Linux equivalent: open() / write() / close() */
     printf("[2/9] Write input.txt...\n");
     QueryPerformanceCounter(&t0);
 
@@ -136,7 +157,9 @@ int main(void) {
     QueryPerformanceCounter(&t1);
     time_write = elapsed(t0, t1, freq);
 
-    /* ══ 3. CreatePipe / WriteFile / ReadFile ════════════════ */
+    /* ══ 3. CreatePipe / WriteFile / ReadFile ════════════════
+          SC #8 CreatePipe
+          Linux equivalent: pipe() */
     printf("[3/9] Pipe IPC...\n");
     QueryPerformanceCounter(&t0);
 
@@ -157,7 +180,9 @@ int main(void) {
     QueryPerformanceCounter(&t1);
     time_pipe = elapsed(t0, t1, freq);
 
-    /* ══ 4. VirtualAlloc / VirtualFree ══════════════════════ */
+    /* ══ 4. VirtualAlloc / VirtualFree ══════════════════════
+          SC #9 VirtualAlloc  SC #10 VirtualFree
+          Linux equivalent: mmap() / munmap() */
     printf("[4/9] VirtualAlloc/Free...\n");
     QueryPerformanceCounter(&t0);
 
@@ -173,7 +198,9 @@ int main(void) {
     QueryPerformanceCounter(&t1);
     time_vm = elapsed(t0, t1, freq);
 
-    /* ══ 5. SetFileSecurity ══════════════════════════════════ */
+    /* ══ 5. SetFileSecurity ══════════════════════════════════
+          SC #11 SetFileSecurity
+          Linux equivalent: chmod() / chown() / umask() */
     printf("[5/9] SetFileSecurity...\n");
     QueryPerformanceCounter(&t0);
 
@@ -203,7 +230,9 @@ int main(void) {
     QueryPerformanceCounter(&t1);
     time_perm = elapsed(t0, t1, freq);
 
-    /* ══ 6. CreateProcess / WaitForSingleObject ══════════════ */
+    /* ══ 6. CreateProcess / WaitForSingleObject ══════════════
+          SC #12 CreateProcess  SC #13 WaitForSingleObject
+          Linux equivalent: fork() / execlp() / waitpid() */
     printf("[6/9] CreateProcess...\n");
     QueryPerformanceCounter(&t0);
 
@@ -225,7 +254,9 @@ int main(void) {
     QueryPerformanceCounter(&t1);
     time_proc = elapsed(t0, t1, freq);
 
-    /* ══ 7. CreateFileMapping / MapViewOfFile ════════════════ */
+    /* ══ 7. CreateFileMapping / MapViewOfFile ════════════════
+          SC #14 CreateFileMapping  SC #15 MapViewOfFile
+          Linux equivalent: shmget() / shmat() */
     printf("[7/9] Shared memory map...\n");
     QueryPerformanceCounter(&t0);
 
@@ -240,7 +271,8 @@ int main(void) {
     QueryPerformanceCounter(&t1);
     time_map = elapsed(t0, t1, freq);
 
-    /* ══ 8. CreateFile / ReadFile → shared memory ════════════ */
+    /* ══ 8. CreateFile / ReadFile → shared memory ════════════
+          Linux equivalent: open() / read() */
     printf("[8/9] Read input.txt -> shared memory...\n");
     QueryPerformanceCounter(&t0);
 
@@ -267,7 +299,8 @@ int main(void) {
     QueryPerformanceCounter(&t1);
     time_read = elapsed(t0, t1, freq);
 
-    /* ══ 9. Parallel FFT: CreateThread / WaitForMultipleObjects */
+    /* ══ 9. Parallel FFT: CreateThread / WaitForMultipleObjects
+          Linux equivalent: pthread_create() / pthread_join() */
     printf("[9/9] Parallel FFT...\n");
     QueryPerformanceCounter(&t0);
 
@@ -305,33 +338,62 @@ int main(void) {
     char line[256]; int n;
 
 #define WL(...) do { n = sprintf(line, __VA_ARGS__); WriteFile(hf, line, n, &written, NULL); } while(0)
-
-    WL("=== Windows CCP — CT-353 Operating Systems ===\r\n");
+    WL("=========================================");
+    WL("\nWindows CCP — CT-353 Operating Systems\r\n");
+    WL("=========================================");
+    WL("\nInput Signal: Sequential integers from 1 to %d (N=%d)\r\n", N, N);
     WL("Pipe received : %s\r\n\r\n", pipe_msg);
-    WL("=== SYSTEM CALLS (15) ===\r\n");
+    WL("\n=======================");
+    WL("\nSYSTEM CALLS USED (15) \r\n");
+    WL("=======================\n");
     WL("  File I/O    : CreateFile, ReadFile, WriteFile, CloseHandle\r\n");
     WL("  CRT I/O     : _open, _read, _write, _close\r\n");
     WL("  Process     : CreateProcess, WaitForSingleObject\r\n");
     WL("  Memory      : VirtualAlloc, VirtualFree\r\n");
     WL("  IPC         : CreatePipe, CreateFileMapping, MapViewOfFile\r\n");
     WL("  Permissions : SetFileSecurity\r\n\r\n");
-    WL("=== PERFORMANCE METRICS ===\r\n");
-    WL("  CRT I/O   (_open/_write/_read/_close) : %.6f sec\r\n", time_crt);
-    WL("  Input Write (CreateFile/WriteFile)     : %.6f sec\r\n", time_write);
-    WL("  Input Read  (CreateFile/ReadFile)      : %.6f sec\r\n", time_read);
-    WL("  Shared Map  (CreateFileMapping/MapView): %.6f sec\r\n", time_map);
-    WL("  Pipe IPC    (CreatePipe)               : %.6f sec\r\n", time_pipe);
-    WL("  VirtualAlloc/Free                      : %.6f sec\r\n", time_vm);
-    WL("  Memory Allocated (VirtualAlloc)        : %zu bytes\r\n", vm_bytes);
-    WL("  SetFileSecurity                        : %.6f sec\r\n", time_perm);
-    WL("  CreateProcess/Wait                     : %.6f sec\r\n", time_proc);
-    WL("  FFT (parallel, 2 threads/stage)        : %.6f sec\r\n\r\n", time_fft);
-    WL("=== FFT OUTPUT (N=%d) ===\r\n", N);
+    WL("\n=====================\n");
+    WL("PERFORMANCE METRICS \r\n");
+    WL("=====================\n");
+    WL("  CRT I/O   (_open/_write/_read/_close) : %.6f seconds\r\n", time_crt);
+    WL("  Input Write (CreateFile/WriteFile)     : %.6f seconds\r\n", time_write);
+    WL("  Input Read  (CreateFile/ReadFile)      : %.6f seconds\r\n", time_read);
+    WL("  Shared Map  (CreateFileMapping/MapView): %.6f seconds\r\n", time_map);
+    WL("  Pipe IPC    (CreatePipe)               : %.6f seconds\r\n", time_pipe);
+    WL("  VirtualAlloc/Free                      : %.6f seconds\r\n", time_vm);
+    WL("  Memory Allocated (VirtualAlloc)        : %zu bytes (%.1f KB)\r\n", vm_bytes, vm_bytes / 1024.0);
+    WL("  SetFileSecurity                        : %.6f seconds\r\n", time_perm);
+    WL("  CreateProcess/Wait                     : %.6f seconds\r\n", time_proc);
+    WL("  FFT (parallel, 2 threads/stage)        : %.6f seconds\r\n\r\n", time_fft);
 
-    for (int i = 0; i < N; i++) {
-        n = sprintf(line, "X[%4d] = %10.4f %+10.4fi\r\n", i, fft_data[i].real, fft_data[i].imag);
+    WL("\n==================================================\n");
+    WL("FFT OUTPUT (N=%d, first 20 and last 20 bins)\r", N);
+    WL("==================================================\n");
+    WL("  %-8s  %-12s  %-12s  %-12s\r\n", "k", "Real", "Imaginary", "Magnitude");
+    WL("  %-8s  %-12s  %-12s  %-12s\r\n", "--------","------------","------------","------------");
+
+    /* First 20 */
+    for (int i = 0; i < 20; i++) {
+        double mag = sqrt(fft_data[i].real * fft_data[i].real +
+                          fft_data[i].imag * fft_data[i].imag);
+        n = sprintf(line, "  %-8d  %12.4f  %+12.4fi  %12.4f\r\n",
+                    i, fft_data[i].real, fft_data[i].imag, mag);
         WriteFile(hf, line, n, &written, NULL);
     }
+
+    /* Separator */
+    WL("  %-8s  %-12s  %-12s  %-12s\r\n", "...", "...", "...", "...");
+
+    /* Last 20 */
+    for (int i = N-20; i < N; i++) {
+        double mag = sqrt(fft_data[i].real * fft_data[i].real +
+                          fft_data[i].imag * fft_data[i].imag);
+        n = sprintf(line, "  %-8d  %12.4f  %+12.4fi  %12.4f\r\n",
+                    i, fft_data[i].real, fft_data[i].imag, mag);
+        WriteFile(hf, line, n, &written, NULL);
+    }
+
+    WL("\r\n  Note: Showing first 20 and last 20 of %d total bins.\r\n", N);
     CloseHandle(hf);
     log_msg("[OK] output.txt written");
 
@@ -342,20 +404,34 @@ int main(void) {
     else                            log_msg("[OK] CloseHandle(FFT_MAP)");
 
     /* ══ Console summary ═════════════════════════════════════ */
-    printf("\n=== Performance Summary ===\n");
+    printf("--------------------------\n");
+    printf(" Performance Summary\n");
+    printf("--------------------------\n");
     printf("  Pipe received : %s\n\n",    pipe_msg);
-    printf("  CRT I/O       : %.6f sec\n", time_crt);
-    printf("  Input write   : %.6f sec\n", time_write);
-    printf("  Input read    : %.6f sec\n", time_read);
-    printf("  Shared map    : %.6f sec\n", time_map);
-    printf("  Pipe IPC      : %.6f sec\n", time_pipe);
-    printf("  VirtualAlloc  : %.6f sec  (%zu bytes)\n", time_vm, vm_bytes);
-    printf("  Permissions   : %.6f sec\n", time_perm);
-    printf("  CreateProcess : %.6f sec\n", time_proc);
-    printf("  FFT           : %.6f sec\n", time_fft);
-    printf("\nFiles ready: input.txt  output.txt  ccp_log.txt\n");
+    printf("  CRT I/O       : %.6f seconds\n", time_crt);
+    printf("  Input write   : %.6f seconds\n", time_write);
+    printf("  Input read    : %.6f seconds\n", time_read);
+    printf("  Shared map    : %.6f seconds\n", time_map);
+    printf("  Pipe IPC      : %.6f seconds\n", time_pipe);
+    printf("  VirtualAlloc  : %.6f sec  (%zu bytes / %.1f KB)\n", time_vm, vm_bytes, vm_bytes / 1024.0);
+    printf("  Permissions   : %.6f seconds\n", time_perm);
+    printf("  CreateProcess : %.6f seconds\n", time_proc);
+    printf("  FFT           : %.6f seconds\n", time_fft);
+    printf("\nFILES ARE READY: input.txt  output.txt  ccp_log.txt\n");
+    printf("-------------------\n");
+    log_msg("CCP LOG END ");
+    printf("-------------------\n");
 
-    log_msg("=== CCP LOG END ===");
+    /* Total CPU time — mirrors getrusage() on Linux */
+    FILETIME ct, et, kt, ut;
+    if (GetProcessTimes(GetCurrentProcess(), &ct, &et, &kt, &ut)) {
+        ULARGE_INTEGER k, u;
+        k.LowPart = kt.dwLowDateTime; k.HighPart = kt.dwHighDateTime;
+        u.LowPart = ut.dwLowDateTime; u.HighPart = ut.dwHighDateTime;
+        double cpu_sec = (double)(k.QuadPart + u.QuadPart) / 1.0e7;
+        printf("\n Total CPU Time : %.6f seconds\n", cpu_sec);
+    }
+
     CloseHandle(gLog);
     return 0;
 }
