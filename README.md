@@ -134,19 +134,20 @@ X[   1] =    -0.5000  +325.9491i
 
 ---
 
-## Windows vs Linux Comparison (draft for now)
+## Windows vs Linux Comparison
 
 | Operation | Windows API | Linux POSIX | Key Difference |
 |---|---|---|---|
-| File open | `CreateFile` (1 call, many flags) | `open` (simpler flags) | Win32 is more verbose |
-| Shared memory | `CreateFileMapping` + `MapViewOfFile` | `shmget` + `shmat` | Linux uses System V IPC keys; Windows uses named objects |
-| Process creation | Single `CreateProcess` | `fork` + `exec` (2 steps) | Linux separates spawn from replace |
-| Memory mapping | `VirtualAlloc` (page-granular) | `mmap` (flexible, file-backed or anonymous) | `mmap` is more general |
-| Permissions | `SetFileSecurity` (ACL-based) | `chmod` / `chown` / `umask` (Unix bits) | Linux model is simpler |
-| Threads | `CreateThread` / `WaitForMultipleObjects` | `pthread_create` / `pthread_join` | POSIX threads are portable across Unix systems |
-| Timing | `QueryPerformanceCounter` | `clock_gettime(CLOCK_MONOTONIC)` | Both give nanosecond resolution |
-| Error reporting | `GetLastError()` | `errno` | Different conventions |
-
+| File open/read/write | `CreateFile`, `ReadFile`, `WriteFile`, `CloseHandle` | `open`, `read`, `write`, `close` | Windows uses a single handle-based API with many flags; Linux uses simpler, Unix-style file descriptors |
+| Process creation | `CreateProcess` | `fork` + `execlp` + `waitpid` | Windows performs creation in one call; Linux separates duplication (`fork`) and execution (`exec`) |
+| Memory allocation | `VirtualAlloc`, `VirtualFree` | `mmap`, `munmap` | Linux `mmap` supports both file-backed and anonymous mapping; Windows uses page-based allocation |
+| Shared memory | `CreateFileMapping`, `MapViewOfFile` | `shmget`, `shmat` | Windows uses named mapping objects; Linux uses System V IPC keys and attachment model |
+| Pipe IPC | `CreatePipe` | `pipe` | Both provide unidirectional communication; Linux integrates naturally with file descriptors |
+| Permissions | `SetFileSecurity` | `chmod`, `chown`, `umask` | Windows uses ACL-based security; Linux uses simpler permission bits model |
+| Threads | `CreateThread`, `WaitForMultipleObjects` | `pthread_create`, `pthread_join` | POSIX threads are portable and standardized; Windows threads are OS-specific |
+| Timing | `QueryPerformanceCounter` | `clock_gettime(CLOCK_MONOTONIC)` | Both provide high-resolution timing; Linux uses standardized POSIX clocks |
+| Error reporting | `GetLastError()` | `errno` | Windows uses explicit API calls for errors; Linux uses global error variable (`errno`) |
+| Memory mapping (FFT buffer) | `MapViewOfFile` | `mmap` | Linux directly maps memory regions; Windows requires mapping objects before access |
 ---
 
 ## Error Handling
